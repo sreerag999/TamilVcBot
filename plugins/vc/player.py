@@ -37,6 +37,7 @@ __starts with ! (exclamation mark)__
 ✯ `!resume` resume playing,
 ✯ `!mute`  mute the VC userbot,
 ✯ `!unmute`  unmute the VC userbot.
+"""
 
 async def current_vc_filter(_, __, m: Message):
     group_call = mp.group_call
