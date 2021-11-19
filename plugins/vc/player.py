@@ -1,14 +1,29 @@
+"""Play and Control Audio playing in Telegram Voice Chat
 
-import os, asyncio, ffmpeg
+Dependencies:
+- ffmpeg
+
+Required group admin permissions:
+- Delete messages
+- Manage voice chats (optional)
+
+How to use:
+- Start the userbot
+- send !join to a voice chat enabled group chat
+  from userbot account itself or its contacts
+- reply to an audio with /play to start playing
+  it in the voice chat, every member of the group
+  can use the !play command now
+- check !help for more commands
+"""
+import os
+import asyncio
 from datetime import datetime, timedelta
 from pyrogram import Client, filters, emoji
 from pyrogram.types import Message
 from pyrogram.methods.messages.download_media import DEFAULT_DOWNLOAD_DIR
 from pytgcalls import GroupCall
-#------------------------------------------
-from youtube_search import YoutubeSearch
-from pytube import YouTube
-#------------------------------------------
+import ffmpeg
 
 DELETE_DELAY = 8
 
@@ -37,7 +52,32 @@ __starts with ! (exclamation mark)__
 ✯ `!resume` resume playing,
 ✯ `!mute`  mute the VC userbot,
 ✯ `!unmute`  unmute the VC userbot.
-"""
+
+✯ provided by 🤖 **[TamilBots](https://t.me/TamilBots)**
+✯ For Support 🆘 **[TamilSupport](https://t.me/TamilSupport)**"""
+
+USERBOT_REPO = f"""{emoji.ROBOT} Tamil Voice Chat UserBot
+» Repository: **[GitHub](https://github.com/tamilbots/tamilvcbot)**
+» Provided by **[TamilBots](https://t.me/TamilBots)**
+» License: AGPL-3.0-or-later"""
+
+
+# - Pyrogram filters
+
+main_filter = (
+    filters.group
+    & filters.text
+    & ~filters.edited
+    & ~filters.via_bot
+)
+self_or_contact_filter = filters.create(
+    lambda
+    _,
+    __,
+    message:
+    (message.from_user and message.from_user.is_contact) or message.outgoing
+)
+
 
 async def current_vc_filter(_, __, m: Message):
     group_call = mp.group_call
@@ -49,6 +89,10 @@ async def current_vc_filter(_, __, m: Message):
     return False
 
 current_vc = filters.create(current_vc_filter)
+
+
+# - class
+
 
 class MusicPlayer(object):
     def __init__(self):
@@ -106,48 +150,57 @@ async def playout_ended_handler(group_call, filename):
 # - Pyrogram handlers
 
 
-@Client.on_message(filters.command("play", "!") | filters.audio) & (filters.group & current_vc))
+@Client.on_message(
+    filters.group
+    & ~filters.edited
+    & current_vc
+    & (filters.regex("^(\\/|!)play$") | filters.audio)
+)
 async def play_track(client, m: Message):
-    query = m.text.split(None, 1)[1]
-    i = await m.reply("Searching...")
-    try:
-        x = YoutubeSearch(query, max_results=1).to_dict()      
-        url = f"https://youtube.com/watch?v={x[0]['id']}"
-    except: 
-        return await i.edit("Provide an argument along with the command 😖")
-
-    try:
-        audio = YouTube(url).streams.filter(only_audio=True)[0].download(filename=f"{x['title']}.mp3")
-    except Exception as x:
-        print(x)
-        return await i.edit("Error occurred while downloading music...")
-
     group_call = mp.group_call
     playlist = mp.playlist
-    await mp.send_playlist()
-    return await m.delete()
-        
+    # check audio
+    if m.audio:
+        if m.audio.duration > 600:
+            reply = await m.reply_text(
+                f"{emoji.ROBOT} audio which duration longer than 10 min "
+                "won't be automatically added to playlist"
+            )
+            await _delay_delete_messages((reply, ), DELETE_DELAY)
+            return
+        m_audio = m
+    elif m.reply_to_message and m.reply_to_message.audio:
+        m_audio = m.reply_to_message
+    else:
+        await mp.send_playlist()
+        await m.delete()
+        return
     # check already added
-    if playlist and playlist[-1].audio = m_audio:
+    if playlist and playlist[-1].audio.file_unique_id \
+            == m_audio.audio.file_unique_id:
         reply = await m.reply_text(f"{emoji.ROBOT} already added")
-        return await _delay_delete_messages((reply, m), DELETE_DELAY)
-        
+        await _delay_delete_messages((reply, m), DELETE_DELAY)
+        return
     # add to playlist
     playlist.append(m_audio)
     if len(playlist) == 1:
-        m_status = await m.reply_text(f"Download and transcoding...")
-        
+        m_status = await m.reply_text(
+            f"{emoji.INBOX_TRAY} downloading and transcoding..."
+        )
         await download_audio(playlist[0])
-        group_call.input_filename = os.path.join(client.workdir, DEFAULT_DOWNLOAD_DIR, f"{playlist[0].audio}")     
-        
+        group_call.input_filename = os.path.join(
+            client.workdir,
+            DEFAULT_DOWNLOAD_DIR,
+            f"{playlist[0].audio.file_unique_id}.raw"
+        )
         await mp.update_start_time()
         await m_status.delete()
-
-        await client.send_message(m.chat.id, f"**✅ Playing:** {playlist[0].audio.title}")
-
+        print(f"- START PLAYING: {playlist[0].audio.title}")
     await mp.send_playlist()
     for track in playlist[:2]:
         await download_audio(track)
+    if not m.audio:
+        await m.delete()
 
 
 @Client.on_message(main_filter
